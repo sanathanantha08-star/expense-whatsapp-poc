@@ -34,6 +34,8 @@ client versions -- the user just replies with the number.
 
 ## 1. Install the bridge
 
+Open your **first terminal** and run:
+
 ```bash
 cd whatsapp-bridge
 npm install
@@ -42,7 +44,7 @@ node index.js
 
 A QR code will print in your terminal. Open WhatsApp on your **spare** phone/number
 -> Settings -> Linked Devices -> Link a Device -> scan it. Once linked, you'll see
-"WhatsApp bridge connected." in the terminal -- leave this running.
+"WhatsApp bridge connected." in the terminal -- leave this terminal running.
 
 Your `auth_info/` folder (created automatically) stores the session so you don't
 need to re-scan every restart, unless you get logged out.
@@ -50,9 +52,11 @@ need to re-scan every restart, unless you get logged out.
 ## 2. Set the manager's number
 
 In `app/state.py`:
+
 ```python
-MANAGER_WHATSAPP_NUMBER = "971521234567"  # raw digits, no + or whatsapp: prefix
+MANAGER_WHATSAPP_NUMBER = "971xxxxxxx"  # raw digits, no + or whatsapp: prefix
 ```
+
 Use a second spare number here, separate from the one linked in step 1.
 
 ## 3. Get a Cohere key
@@ -65,13 +69,49 @@ https://dashboard.cohere.com/api-keys -- free trial key works.
 COHERE_API_KEY=your_key_here
 WA_BRIDGE_URL=http://localhost:3000
 ```
+
 (You can delete the old WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID /
 WHATSAPP_VERIFY_TOKEN lines -- not used in this version.)
 
 ## 5. Run the Python app
 
+Open a **second terminal** and navigate to the project root.
+
+Create a virtual environment (if you haven't already):
+
+```bash
+python -m venv venv
+```
+
+Activate it:
+
+**macOS / Linux**
+
+```bash
+source venv/bin/activate
+```
+
+**Windows (Command Prompt)**
+
+```cmd
+venv\Scripts\activate
+```
+
+**Windows (PowerShell)**
+
+```powershell
+venv\Scripts\Activate.ps1
+```
+
+Install the required dependencies:
+
 ```bash
 pip install -r requirements.txt
+```
+
+Run the FastAPI application:
+
+```bash
 python3 -m uvicorn app.main:app --reload --port 8000
 ```
 
@@ -79,6 +119,11 @@ Make sure tesseract is installed on your machine (`brew install tesseract` /
 `sudo apt install tesseract-ocr`).
 
 ## 6. Test it
+
+To test the application, keep **both terminals running**:
+
+* **Terminal 1:** `cd whatsapp-bridge` → `node index.js`
+* **Terminal 2:** FastAPI backend running with `python3 -m uvicorn app.main:app --reload --port 8000`
 
 From a **third** WhatsApp number (the "employee"), message the number you linked
 in step 1: send "hi". You should get the menu back as a numbered list. Reply
@@ -88,5 +133,3 @@ approve/reject number notifies the employee.
 
 No ngrok, no webhook config, no Meta dashboard needed for this version -- the
 bridge and FastAPI both run locally and talk to each other directly.
-
-
