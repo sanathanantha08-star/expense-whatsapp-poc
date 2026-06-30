@@ -1,4 +1,3 @@
-
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -14,6 +13,15 @@ const FASTAPI_URL = process.env.FASTAPI_URL || "http://localhost:8000";
 const BRIDGE_PORT = process.env.BRIDGE_PORT || 3000;
 
 let sock; // current Baileys socket, set after connection
+
+// Don't let one bad/unexpected event (malformed media, decryption failure,
+// etc.) take down the whole bridge process mid-demo.
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled rejection (bridge stayed alive):", err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception (bridge stayed alive):", err);
+});
 
 async function startSock() {
   const { state, saveCreds } = await useMultiFileAuthState("auth_info");
@@ -48,50 +56,71 @@ async function startSock() {
     console.log(`\n--- messages.upsert fired, type=${type}, count=${messages.length} ---`);
 
     for (const msg of messages) {
-      console.log("raw msg.key:", JSON.stringify(msg.key));
-      console.log("raw msg.message keys:", msg.message ? Object.keys(msg.message) : "NO MESSAGE OBJECT");
-
-      if (!msg.message) {
-        console.log("Skipping: no message content (likely a protocol/status message)");
-        continue;
-      }
-      if (msg.key.fromMe) {
-        console.log("Skipping: message is from ourselves (fromMe=true)");
-        continue;
-      }
-
-      // WhatsApp's privacy "LID" addressing can put a non-phone-number ID in
-      // remoteJid (e.g. "277004016439542@lid"); the real phone number, when
-      // available, is in remoteJidAlt instead. Prefer that.
-      const from = msg.key.remoteJidAlt || msg.key.remoteJid;
-      const phone = from.split("@")[0];
-
-      let payload = { from: phone, type: "text", text: "" };
-
-      if (msg.message.conversation) {
-        payload.text = msg.message.conversation;
-      } else if (msg.message.extendedTextMessage?.text) {
-        payload.text = msg.message.extendedTextMessage.text;
-      } else if (msg.message.imageMessage) {
-        const buffer = await downloadMediaMessage(msg, "buffer", {});
-        payload.type = "image";
-        payload.image_base64 = buffer.toString("base64");
-        payload.caption = msg.message.imageMessage.caption || "";
-      } else {
-        console.log("Skipping: unrecognized message type, keys were:", Object.keys(msg.message));
-        continue;
-      }
-
-      console.log("Forwarding payload to FastAPI:", JSON.stringify({ ...payload, image_base64: payload.image_base64 ? "[omitted]" : undefined }));
-
       try {
-        const resp = await axios.post(`${FASTAPI_URL}/wa-bridge/incoming`, payload);
-        console.log("FastAPI responded:", resp.status, resp.data);
-      } catch (err) {
-        console.error("Failed to forward message to FastAPI:", err.message);
-        if (err.response) {
-          console.error("FastAPI error response:", err.response.status, err.response.data);
+        console.log("raw msg.key:", JSON.stringify(msg.key));
+        console.log("raw msg.message keys:", msg.message ? Object.keys(msg.message) : "NO MESSAGE OBJECT");
+
+        if (!msg.message) {
+          console.log("Skipping: no message content (likely a protocol/status message)");
+          continue;
         }
+        if (msg.key.fromMe) {
+          console.log("Skipping: message is from ourselves (fromMe=true)");
+          continue;
+        }
+
+        // WhatsApp's privacy "LID" addressing can put a non-phone-number ID in
+        // remoteJid (e.g. "277004016439542@lid"); the real phone number, when
+        // available, is in remoteJidAlt instead. Prefer that.
+        const from = msg.key.remoteJidAlt || msg.key.remoteJid;
+
+        // Skip anything that isn't a 1:1 chat with a real user. Channels
+        // ("@newsletter"), groups ("@g.us"), and broadcast lists can also
+        // show up here -- and channel image messages in particular can
+        // arrive with no usable media key, which previously crashed the
+        // process inside downloadMediaMessage.
+        if (!from || !from.endsWith("@s.whatsapp.net")) {
+          console.log("Skipping: not a 1:1 user chat (jid:", from, ")");
+          continue;
+        }
+        const phone = from.split("@")[0];
+
+        let payload = { from: phone, type: "text", text: "" };
+
+        if (msg.message.conversation) {
+          payload.text = msg.message.conversation;
+        } else if (msg.message.extendedTextMessage?.text) {
+          payload.text = msg.message.extendedTextMessage.text;
+        } else if (msg.message.imageMessage) {
+          try {
+            const buffer = await downloadMediaMessage(msg, "buffer", {});
+            payload.type = "image";
+            payload.image_base64 = buffer.toString("base64");
+            payload.caption = msg.message.imageMessage.caption || "";
+          } catch (err) {
+            console.error("Failed to download image media, skipping message:", err.message);
+            continue;
+          }
+        } else {
+          console.log("Skipping: unrecognized message type, keys were:", Object.keys(msg.message));
+          continue;
+        }
+
+        console.log("Forwarding payload to FastAPI:", JSON.stringify({ ...payload, image_base64: payload.image_base64 ? "[omitted]" : undefined }));
+
+        try {
+          const resp = await axios.post(`${FASTAPI_URL}/wa-bridge/incoming`, payload);
+          console.log("FastAPI responded:", resp.status, resp.data);
+        } catch (err) {
+          console.error("Failed to forward message to FastAPI:", err.message);
+          if (err.response) {
+            console.error("FastAPI error response:", err.response.status, err.response.data);
+          }
+        }
+      } catch (err) {
+        // Final safety net per-message: log and move on to the next message
+        // rather than letting any unexpected error escape the loop.
+        console.error("Unexpected error handling message, skipping it:", err.message);
       }
     }
   });

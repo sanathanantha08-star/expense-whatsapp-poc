@@ -14,7 +14,8 @@ Extract these fields as strict JSON, no markdown, no commentary:
   "amount": <number, total amount paid, no currency symbol>,
   "currency": "<3-letter currency code if visible, else best guess e.g. AED>",
   "date": "<date on receipt in YYYY-MM-DD, else null>",
-  "category_guess": "<one of: food, travel, parking, accommodation, misc>"
+  "category_guess": "<one of: food, travel, parking, accommodation, misc>",
+  "payment_method_guess": "<one of: card, cash, personal -- infer from receipt text: look for words like VISA/MASTERCARD/credit/debit card -> 'card', explicit cash payment -> 'cash', otherwise default to 'personal'>"
 }}
 
 If a field is unreadable, make your best reasonable estimate rather than leaving it null, except date which can be null.
@@ -52,6 +53,7 @@ def parse_receipt_fields(ocr_text: str) -> dict:
             "currency": "AED",
             "date": None,
             "category_guess": "misc",
+            "payment_method_guess": "personal",
         }
     # safety defaults
     data.setdefault("vendor", "Unknown")
@@ -59,4 +61,5 @@ def parse_receipt_fields(ocr_text: str) -> dict:
     data.setdefault("currency", "AED")
     data.setdefault("date", None)
     data.setdefault("category_guess", "misc")
+    data.setdefault("payment_method_guess", "personal")
     return data
